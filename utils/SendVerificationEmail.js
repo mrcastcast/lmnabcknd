@@ -8,20 +8,11 @@ async function sendVerificationEmail(email, code) {
       from: process.env.EMAIL_FROM,
       to: email,
       subject: "Verify your Lumina account",
-
       html: `
-        <div style="
-          background:#0a1428;
-          padding:40px;
-          font-family:Arial;
-          color:white;
-        ">
+        <div style="background:#0a1428;padding:40px;font-family:Arial;color:white;">
+          <h1 style="color:#d4af37;">Lumina Verification</h1>
 
-          <h1 style="color:#d4af37;">
-            Lumina Verification
-          </h1>
-
-          <p>Your verification code:</p>
+          <p>Your verification code is:</p>
 
           <div style="
             font-size:42px;
@@ -33,18 +24,17 @@ async function sendVerificationEmail(email, code) {
             ${code}
           </div>
 
-          <p>
-            This code expires in 10 minutes.
-          </p>
-
+          <p>This code expires in 10 minutes.</p>
+          <p>If you did not create this account, you can ignore this email.</p>
         </div>
       `
     });
 
-    console.log("Verification email sent:", email);
+    console.log("✅ Verification email sent:", email);
 
   } catch (error) {
-    console.error(error);
+    console.error("❌ Resend email error:", error);
+    throw error;
   }
 }
 

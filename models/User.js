@@ -26,6 +26,21 @@ const userSchema = new mongoose.Schema({
     required: true
   },
 
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+
+  verificationCode: {
+    type: String,
+    default: null
+  },
+
+  verificationCodeExpires: {
+    type: Date,
+    default: null
+  },
+
   balance: {
     type: Number,
     default: 0
@@ -42,13 +57,11 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
-  // Сите registrations преку referral
   referralCount: {
     type: Number,
     default: 0
   },
 
-  // Само referrals кои купиле пакет и биле approved
   activeReferralCount: {
     type: Number,
     default: 0

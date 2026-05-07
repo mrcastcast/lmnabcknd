@@ -4,14 +4,25 @@ const router = express.Router();
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const sendVerificationEmail = require("../utils/sendVerificationEmail");
 
 function generateReferralCode() {
   return "LUM" + Math.floor(100000 + Math.random() * 900000);
 }
 
+function generateVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 router.post("/register", async (req, res) => {
   try {
     const { fullName, email, phone, password, referralCode } = req.body;
+
+    if (!fullName || !email || !phone || !password) {
+      return res.status(400).json({
+        message: "All fields are required"
+      });
+    }
 
     const existingUser = await User.findOne({ email });
 
@@ -37,11 +48,17 @@ router.post("/register", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const verificationCode = generateVerificationCode();
+
     const newUser = await User.create({
       fullName,
       email,
       phone,
       password: hashedPassword,
+
+      emailVerified: false,
+      verificationCode,
+      verificationCodeExpires: new Date(Date.now() + 10 * 60 * 1000),
 
       balance: 0,
 
@@ -58,28 +75,141 @@ router.post("/register", async (req, res) => {
       await referrer.save();
     }
 
+    await sendVerificationEmail(email, verificationCode);
+
+    res.status(201).json({
+      success: true,
+      message: "Verification code sent to email",
+      requiresVerification: true,
+      email: newUser.email
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+});
+
+router.post("/verify-email", async (req, res) => {
+  try {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({
+        message: "Email and verification code are required"
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found"
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.json({
+        success: true,
+        message: "Email already verified"
+      });
+    }
+
+    if (!user.verificationCode || !user.verificationCodeExpires) {
+      return res.status(400).json({
+        message: "No verification code found. Please request a new code."
+      });
+    }
+
+    if (new Date() > user.verificationCodeExpires) {
+      return res.status(400).json({
+        message: "Verification code expired. Please request a new code."
+      });
+    }
+
+    if (user.verificationCode !== code) {
+      return res.status(400).json({
+        message: "Invalid verification code"
+      });
+    }
+
+    user.emailVerified = true;
+    user.verificationCode = null;
+    user.verificationCodeExpires = null;
+
+    await user.save();
+
     const token = jwt.sign(
-      { id: newUser._id },
+      { id: user._id },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );
 
-    res.status(201).json({
+    res.json({
       success: true,
-      message: "Registration successful",
+      message: "Email verified successfully",
       token,
       user: {
-        id: newUser._id,
-        fullName: newUser.fullName,
-        email: newUser.email,
-        balance: newUser.balance,
-        referralCode: newUser.referralCode,
-        referralCount: newUser.referralCount,
-        referredBy: referrer ? referrer.referralCode : null,
-        plan: newUser.plan,
-        planName: newUser.planName,
-        planActive: newUser.planActive
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        balance: user.balance,
+        referralCode: user.referralCode,
+        referralCount: user.referralCount,
+        activeReferralCount: user.activeReferralCount || 0,
+        plan: user.plan,
+        planName: user.planName,
+        planActive: user.planActive,
+        emailVerified: user.emailVerified
       }
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+});
+
+router.post("/resend-code", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required"
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found"
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.status(400).json({
+        message: "Email is already verified"
+      });
+    }
+
+    const verificationCode = generateVerificationCode();
+
+    user.verificationCode = verificationCode;
+    user.verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+    await user.save();
+
+    await sendVerificationEmail(email, verificationCode);
+
+    res.json({
+      success: true,
+      message: "New verification code sent"
     });
 
   } catch (error) {
@@ -112,6 +242,14 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message: "Please verify your email first",
+        requiresVerification: true,
+        email: user.email
+      });
+    }
+
     const token = jwt.sign(
       { id: user._id },
       process.env.JWT_SECRET,
@@ -129,9 +267,11 @@ router.post("/login", async (req, res) => {
         balance: user.balance,
         referralCode: user.referralCode,
         referralCount: user.referralCount,
+        activeReferralCount: user.activeReferralCount || 0,
         plan: user.plan,
         planName: user.planName,
-        planActive: user.planActive
+        planActive: user.planActive,
+        emailVerified: user.emailVerified
       }
     });
 
