@@ -56,6 +56,11 @@ const userSchema = new mongoose.Schema({
     default: 0
   },
 
+  lastWithdrawalAt: {
+  type: Date,
+  default: null
+  },
+
   referralCode: {
     type: String,
     unique: true

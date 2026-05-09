@@ -32,6 +32,36 @@ router.post("/request", requireAuth, async (req, res) => {
 
     const user = await User.findById(req.userId);
 
+    const MIN_WITHDRAWAL = 100;
+    const COOLDOWN_DAYS = 7;
+    const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+
+    if (withdrawAmount < MIN_WITHDRAWAL) {
+      return res.status(400).json({
+        message: "Minimum withdrawal amount is $100"
+      });
+    }
+
+    if (user.balance < MIN_WITHDRAWAL) {
+      return res.status(400).json({
+        message: "You need at least $100 balance to withdraw"
+      });
+    }
+
+    if (user.lastWithdrawalAt) {
+      const nextAllowedWithdraw =
+        new Date(user.lastWithdrawalAt).getTime() + cooldownMs;
+
+      if (Date.now() < nextAllowedWithdraw) {
+        const remainingMs = nextAllowedWithdraw - Date.now();
+        const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+
+        return res.status(429).json({
+          message: `Withdrawal cooldown active. Try again in ${remainingDays} day(s).`
+        });
+      }
+    }
+
     if (!user) {
       return res.status(404).json({
         message: "User not found"
@@ -45,6 +75,7 @@ router.post("/request", requireAuth, async (req, res) => {
     }
 
     user.balance -= withdrawAmount;
+    user.lastWithdrawalAt = new Date();
     await user.save();
 
     const withdrawal = await Withdrawal.create({
