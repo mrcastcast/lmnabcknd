@@ -146,12 +146,15 @@ router.post("/:id/approve", async (req, res) => {
 
       await user.save();
 
-      if (user.referredBy && !wasAlreadyActive) {
+      if (user.referredBy && !payment.referralBonusApplied) {
         const referrer = await User.findById(user.referredBy);
 
         if (referrer) {
           referrer.activeReferralCount = (referrer.activeReferralCount || 0) + 1;
           await referrer.save();
+
+          payment.referralBonusApplied = true;
+          await payment.save();
         }
       }
 

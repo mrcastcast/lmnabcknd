@@ -13,6 +13,11 @@ const paymentSchema = new mongoose.Schema({
     default: "Demo User"
   },
 
+  referralBonusApplied: {
+  type: Boolean,
+  default: false
+  }
+
   email: {
     type: String,
     default: "demo@lumina.local"
