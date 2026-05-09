@@ -16,7 +16,7 @@ const paymentSchema = new mongoose.Schema({
   referralBonusApplied: {
   type: Boolean,
   default: false
-  }
+  },
 
   email: {
     type: String,
