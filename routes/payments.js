@@ -109,7 +109,7 @@ router.get("/pending", async (req, res) => {
 |--------------------------------------------------------------------------
 */
 
-router.post("/approve/:id", async (req, res) => {
+router.post("/:id/approve", async (req, res) => {
 
   try {
 
@@ -183,7 +183,7 @@ router.post("/approve/:id", async (req, res) => {
 |--------------------------------------------------------------------------
 */
 
-router.post("/reject/:id", async (req, res) => {
+router.post("/:id/reject", async (req, res) => {
 
   try {
 
