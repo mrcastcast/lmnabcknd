@@ -137,28 +137,36 @@ router.post("/:id/approve", async (req, res) => {
 
     if (user) {
 
+      const wasAlreadyActive = user.planActive === true;
+
       user.plan = payment.planNumber;
-
       user.planName = payment.planName;
-
       user.planActive = true;
-
       user.planActivatedAt = new Date();
 
       await user.save();
 
+      if (user.referredBy && !wasAlreadyActive) {
+        const referrer = await User.findById(user.referredBy);
+
+        if (referrer) {
+          referrer.activeReferralCount = (referrer.activeReferralCount || 0) + 1;
+          await referrer.save();
+        }
+      }
+
       await Transaction.create({
-
-        userId:user._id,
-
-        type:"deposit",
-
-        amount:payment.amount,
-
-        status:"completed",
-
-        description:
-          payment.planName + " Plan Activated"
+        userId: user._id,
+        type: "payment_approved",
+        title: "Plan Activated: " + payment.planName,
+        amount: payment.amount,
+        status: "approved",
+        referenceId: payment.paymentId,
+        meta: {
+          planNumber: payment.planNumber,
+          planName: payment.planName,
+          proofImageName: payment.proofImageName || ""
+        }
       });
     }
 
