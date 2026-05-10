@@ -25,8 +25,6 @@ router.post("/submit", async (req, res) => {
       planNumber,
       planName,
       amount,
-      proofImage,
-      proofImageName
     } = req.body;
 
     if (
@@ -34,8 +32,7 @@ router.post("/submit", async (req, res) => {
       !email ||
       !planNumber ||
       !planName ||
-      !amount ||
-      !proofImage
+      !amount
     ) {
       return res.status(400).json({
         message:"Missing payment data"
@@ -54,9 +51,6 @@ router.post("/submit", async (req, res) => {
       amount,
 
       txid:"",
-
-      proofImage,
-      proofImageName,
 
       status:"pending"
     });
@@ -168,7 +162,6 @@ router.post("/:id/approve", async (req, res) => {
         meta: {
           planNumber: payment.planNumber,
           planName: payment.planName,
-          proofImageName: payment.proofImageName || ""
         }
       });
     }
