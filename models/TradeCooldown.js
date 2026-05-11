@@ -8,12 +8,17 @@ const tradeCooldownSchema = new mongoose.Schema({
     unique: true
   },
 
-  tradesUsed: {
+  usedTrades: {
     type: Number,
     default: 0
   },
 
-  cooldownStart: {
+  resetAt: {
+    type: Date,
+    default: null
+  },
+
+  createdAt: {
     type: Date,
     default: Date.now
   }
