@@ -11,7 +11,7 @@ const PLAN_CONFIG = {
     name: "Starter",
     maxInvests: 2,
     cooldownHours: 24,
-    rewardPerInvest: 2.50
+    rewardPerInvest: 3
   },
 
   2: {
@@ -124,8 +124,8 @@ router.get("/status", requireAuth, async (req, res) => {
     const investsLeft = Math.max(0, config.maxInvests - cooldown.tradesUsed);
 
     const activeReferralCount = user.activeReferralCount || 0;
-    const referralBoostPercent = activeReferralCount * 20;
-    const finalRewardPreview = config.rewardPerInvest * (1 + activeReferralCount * 0.20);
+    const referralBonusPercent = activeReferralCount * 0.07;
+    const finalRewardPreview = config.rewardPerInvest * (1 + activeReferralCount * 0.07);
 
     res.json({
       success: true,

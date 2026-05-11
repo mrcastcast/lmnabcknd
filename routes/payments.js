@@ -140,44 +140,42 @@ router.post("/:id/approve", async (req, res) => {
 
       await user.save();
 
-      if (user.referredBy && !payment.referralBonusApplied) {
-        const referrer = await User.findById(user.referredBy);
+  if (user.referredBy && !payment.referralBonusApplied) {
+    const referrer = await User.findById(user.referredBy);
 
-        if (referrer) {
-          referrer.activeReferralCount = (referrer.activeReferralCount || 0) + 1;
-          await referrer.save();
+    if (referrer) {
+      const referralBonusByPlan = {
+        1: 25,
+        2: 60,
+        3: 115,
+        4: 210
+      };
 
-          payment.referralBonusApplied = true;
-          await payment.save();
-        }
-      }
+      const bonusAmount = referralBonusByPlan[Number(payment.planNumber)] || 0;
+
+      referrer.activeReferralCount = (referrer.activeReferralCount || 0) + 1;
+      referrer.balance = Number(referrer.balance || 0) + bonusAmount;
+
+      await referrer.save();
 
       await Transaction.create({
-        userId: user._id,
-        type: "payment_approved",
-        title: "Plan Activated: " + payment.planName,
-        amount: payment.amount,
-        status: "approved",
+        userId: referrer._id,
+        type: "referral_bonus",
+        title: "Referral Plan Bonus",
+        amount: bonusAmount,
+        status: "completed",
         referenceId: payment.paymentId,
         meta: {
+          referredUserEmail: user.email,
           planNumber: payment.planNumber,
           planName: payment.planName,
+          bonusAmount
         }
       });
+
+      payment.referralBonusApplied = true;
+      await payment.save();
     }
-
-    res.json({
-      success:true,
-      message:"Payment approved"
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      message:"Server error"
-    });
   }
 });
 
