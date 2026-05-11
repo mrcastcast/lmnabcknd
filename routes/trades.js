@@ -6,75 +6,52 @@ const TradeCooldown = require("../models/TradeCooldown");
 const Transaction = require("../models/Transaction");
 const requireAuth = require("../middleware/auth");
 
+const COOLDOWN_HOURS = 24;
+
 const PLAN_CONFIG = {
   1: {
     name: "Starter",
-    maxInvests: 2,
-    cooldownHours: 24,
-    rewardPerInvest: 3
+    maxTrades: 2,
+    monthlyProfit: 150
   },
-
   2: {
     name: "Pro",
-    maxInvests: 3,
-    cooldownHours: 24,
-    rewardPerInvest: 4.22
+    maxTrades: 3,
+    monthlyProfit: 380
   },
-
   3: {
     name: "Elite",
-    maxInvests: 5,
-    cooldownHours: 24,
-    rewardPerInvest: 4.33
+    maxTrades: 5,
+    monthlyProfit: 650
   },
-
   4: {
     name: "Legend",
-    maxInvests: 6,
-    cooldownHours: 24,
-    rewardPerInvest: 6.39
+    maxTrades: 6,
+    monthlyProfit: 1150
   }
 };
 
-function getPlanConfig(plan) {
-  return PLAN_CONFIG[Number(plan)] || null;
+function getCooldownResetDate() {
+  return new Date(Date.now() + COOLDOWN_HOURS * 60 * 60 * 1000);
 }
 
-function getRemainingMs(cooldownStart, cooldownHours) {
-  const cooldownMs = cooldownHours * 60 * 60 * 1000;
-  const endTime = new Date(cooldownStart).getTime() + cooldownMs;
+function formatCooldownText(resetAt) {
+  if (!resetAt) return "Available";
 
-  return Math.max(0, endTime - Date.now());
-}
-
-function formatCooldown(ms) {
-  const hours = Math.floor(ms / (1000 * 60 * 60));
-  const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
-  const seconds = Math.floor((ms % (1000 * 60)) / 1000);
-
-  return `${hours}h ${minutes}m ${seconds}s`;
-}
-
-async function getOrResetCooldown(userId, cooldownHours) {
-  let cooldown = await TradeCooldown.findOne({ userId });
-
-  if (!cooldown) {
-    cooldown = await TradeCooldown.create({
-      userId,
-      tradesUsed: 0,
-      cooldownStart: new Date()
-    });
-  }
-
-  const remainingMs = getRemainingMs(cooldown.cooldownStart, cooldownHours);
+  const remainingMs = new Date(resetAt).getTime() - Date.now();
 
   if (remainingMs <= 0) {
-    cooldown.tradesUsed = 0;
-    cooldown.cooldownStart = new Date();
-    await cooldown.save();
+    return "Available";
   }
 
-  return cooldown;
+  const hours = Math.floor(remainingMs / (1000 * 60 * 60));
+  const minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  return `${hours}h ${minutes}m`;
+}
+
+function getRewardPerInvest(config) {
+  return config.monthlyProfit / 30 / config.maxTrades;
 }
 
 router.get("/status", requireAuth, async (req, res) => {
@@ -87,64 +64,61 @@ router.get("/status", requireAuth, async (req, res) => {
       });
     }
 
-    if (!user.planActive || user.plan === 0) {
+    const planNumber = Number(user.plan || 0);
+    const config = PLAN_CONFIG[planNumber];
+
+    if (!user.planActive || !config) {
       return res.json({
-        success: true,
-        plan: user.plan,
-        planName: user.planName || "Free User",
         planActive: false,
+        planName: "Free User",
         maxTrades: 0,
-        maxInvests: 0,
-        tradesUsed: 0,
+        usedTrades: 0,
         tradesLeft: 0,
-        investsLeft: 0,
+        cooldownText: "Plan inactive",
         rewardPerInvest: 0,
-        activeReferralCount: user.activeReferralCount || 0,
         referralBoostPercent: 0,
-        cooldownRemainingMs: 0,
-        cooldownText: "No active plan"
+        finalRewardPreview: 0
       });
     }
 
-    const config = getPlanConfig(user.plan);
+    let cooldown = await TradeCooldown.findOne({
+      userId: user._id
+    });
 
-    if (!config) {
-      return res.status(400).json({
-        message: "Invalid plan"
-      });
+    if (
+      cooldown &&
+      cooldown.resetAt &&
+      new Date(cooldown.resetAt).getTime() <= Date.now()
+    ) {
+      cooldown.usedTrades = 0;
+      cooldown.resetAt = null;
+      await cooldown.save();
     }
 
-    const cooldown = await getOrResetCooldown(user._id, config.cooldownHours);
+    const usedTrades = cooldown ? cooldown.usedTrades || 0 : 0;
+    const tradesLeft = Math.max(config.maxTrades - usedTrades, 0);
 
-    const remainingMs = getRemainingMs(
-      cooldown.cooldownStart,
-      config.cooldownHours
-    );
+    const activeReferralCount = Number(user.activeReferralCount || 0);
 
-    const investsLeft = Math.max(0, config.maxInvests - cooldown.tradesUsed);
+    const referralBoostPercent = activeReferralCount * 7;
 
-    const activeReferralCount = user.activeReferralCount || 0;
-    const referralBonusPercent = activeReferralCount * 0.07;
-    const finalRewardPreview = config.rewardPerInvest * (1 + activeReferralCount * 0.07);
+    const rewardPerInvest = getRewardPerInvest(config);
+
+    const finalRewardPreview =
+      rewardPerInvest * (1 + activeReferralCount * 0.07);
 
     res.json({
-      success: true,
-      plan: user.plan,
-      planName: user.planName,
-      planActive: user.planActive,
-      maxTrades: config.maxInvests,
-      maxInvests: config.maxInvests,
-      tradesUsed: cooldown.tradesUsed,
-      tradesLeft: investsLeft,
-      investsLeft,
-      baseRewardPerInvest: config.rewardPerInvest,
-      rewardPerInvest: Number(finalRewardPreview.toFixed(2)),
-      activeReferralCount,
+      planActive: true,
+      planName: user.planName || config.name,
+      maxTrades: config.maxTrades,
+      usedTrades,
+      tradesLeft,
+      cooldownText: cooldown && cooldown.resetAt
+        ? formatCooldownText(cooldown.resetAt)
+        : "Available",
+      rewardPerInvest: Number(rewardPerInvest.toFixed(2)),
       referralBoostPercent,
-      cooldownHours: config.cooldownHours,
-      cooldownStart: cooldown.cooldownStart,
-      cooldownRemainingMs: remainingMs,
-      cooldownText: formatCooldown(remainingMs)
+      finalRewardPreview: Number(finalRewardPreview.toFixed(2))
     });
 
   } catch (error) {
@@ -155,111 +129,112 @@ router.get("/status", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/:id/approve", async (req, res) => {
-
+router.post("/use", requireAuth, async (req, res) => {
   try {
+    const user = await User.findById(req.userId);
 
-    const payment = await Payment.findById(req.params.id);
-
-    if (!payment) {
+    if (!user) {
       return res.status(404).json({
-        message:"Payment not found"
+        message: "User not found"
       });
     }
 
-    if (payment.status !== "pending") {
-      return res.status(400).json({
-        message:"Payment already processed"
+    const planNumber = Number(user.plan || 0);
+    const config = PLAN_CONFIG[planNumber];
+
+    if (!user.planActive || !config) {
+      return res.status(403).json({
+        message: "You need an active plan to invest"
       });
     }
 
-    payment.status = "approved";
-
-    await payment.save();
-
-    const user = await User.findOne({
-      email: payment.email
+    let cooldown = await TradeCooldown.findOne({
+      userId: user._id
     });
 
-    if (user) {
-
-      user.plan = payment.planNumber;
-      user.planName = payment.planName;
-      user.planActive = true;
-      user.planActivatedAt = new Date();
-
-      await user.save();
-
-      if (user.referredBy && !payment.referralBonusApplied) {
-
-        const referrer = await User.findById(user.referredBy);
-
-        if (referrer) {
-
-          const referralBonusByPlan = {
-            1: 25,
-            2: 60,
-            3: 115,
-            4: 210
-          };
-
-          const bonusAmount =
-            referralBonusByPlan[Number(payment.planNumber)] || 0;
-
-          referrer.activeReferralCount =
-            (referrer.activeReferralCount || 0) + 1;
-
-          referrer.balance =
-            Number(referrer.balance || 0) + bonusAmount;
-
-          await referrer.save();
-
-          await Transaction.create({
-            userId: referrer._id,
-            type: "referral_bonus",
-            title: "Referral Plan Bonus",
-            amount: bonusAmount,
-            status: "completed",
-            referenceId: payment.paymentId,
-            meta: {
-              referredUserEmail: user.email,
-              planNumber: payment.planNumber,
-              planName: payment.planName,
-              bonusAmount
-            }
-          });
-
-          payment.referralBonusApplied = true;
-
-          await payment.save();
-        }
-      }
-
-      await Transaction.create({
+    if (!cooldown) {
+      cooldown = await TradeCooldown.create({
         userId: user._id,
-        type: "payment_approved",
-        title: "Plan Activated: " + payment.planName,
-        amount: payment.amount,
-        status: "approved",
-        referenceId: payment.paymentId,
-        meta: {
-          planNumber: payment.planNumber,
-          planName: payment.planName,
-        }
+        usedTrades: 0,
+        resetAt: null
       });
     }
 
+    if (
+      cooldown.resetAt &&
+      new Date(cooldown.resetAt).getTime() <= Date.now()
+    ) {
+      cooldown.usedTrades = 0;
+      cooldown.resetAt = null;
+      await cooldown.save();
+    }
+
+    if (cooldown.usedTrades >= config.maxTrades) {
+      return res.status(429).json({
+        message: "Daily invest limit reached",
+        cooldownText: formatCooldownText(cooldown.resetAt)
+      });
+    }
+
+    const activeReferralCount = Number(user.activeReferralCount || 0);
+
+    const rewardPerInvest = getRewardPerInvest(config);
+
+    const referralBonusPercent = activeReferralCount * 0.07;
+
+    const finalReward =
+      rewardPerInvest * (1 + referralBonusPercent);
+
+    user.balance =
+      Number(user.balance || 0) + finalReward;
+
+    await user.save();
+
+    cooldown.usedTrades += 1;
+
+    if (cooldown.usedTrades >= config.maxTrades) {
+      cooldown.resetAt = getCooldownResetDate();
+    }
+
+    await cooldown.save();
+
+    await Transaction.create({
+      userId: user._id,
+      type: "trade_simulation",
+      title: "AI Investment Reward",
+      amount: Number(finalReward.toFixed(2)),
+      status: "completed",
+      description: "AI Investment Reward",
+      meta: {
+        planNumber,
+        planName: user.planName || config.name,
+        baseReward: Number(rewardPerInvest.toFixed(2)),
+        activeReferralCount,
+        referralBonusPercent: activeReferralCount * 7,
+        finalReward: Number(finalReward.toFixed(2))
+      }
+    });
+
     res.json({
-      success:true,
-      message:"Payment approved"
+      success: true,
+      message: "Investment completed successfully",
+      baseReward: Number(rewardPerInvest.toFixed(2)),
+      activeReferralCount,
+      referralBonusPercent: activeReferralCount * 7,
+      finalReward: Number(finalReward.toFixed(2)),
+      newBalance: Number(user.balance.toFixed(2)),
+      usedTrades: cooldown.usedTrades,
+      maxTrades: config.maxTrades,
+      tradesLeft: Math.max(config.maxTrades - cooldown.usedTrades, 0),
+      cooldownText: cooldown.resetAt
+        ? formatCooldownText(cooldown.resetAt)
+        : "Available"
     });
 
   } catch (error) {
-
     console.error(error);
-
     res.status(500).json({
-      message:"Server error"
+      message: "Server error"
     });
   }
 });

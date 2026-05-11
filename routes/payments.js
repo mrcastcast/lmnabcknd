@@ -9,120 +9,96 @@ function generatePaymentId() {
   return "LUM-PAY-" + Math.floor(10000000 + Math.random() * 90000000);
 }
 
-/*
-|--------------------------------------------------------------------------
-| SUBMIT PAYMENT
-|--------------------------------------------------------------------------
-*/
-
 router.post("/submit", async (req, res) => {
-
   try {
-
     const {
       fullName,
       email,
       planNumber,
       planName,
-      amount,
+      amount
     } = req.body;
 
-    if (
-      !fullName ||
-      !email ||
-      !planNumber ||
-      !planName ||
-      !amount
-    ) {
+    if (!fullName || !email || !planNumber || !planName || !amount) {
       return res.status(400).json({
-        message:"Missing payment data"
+        message: "Missing payment data"
       });
     }
 
     const payment = await Payment.create({
-
       paymentId: generatePaymentId(),
-
       fullName,
       email,
-
       planNumber,
       planName,
       amount,
-
-      txid:"",
-
-      status:"pending"
+      txid: "",
+      status: "pending"
     });
 
     res.status(201).json({
-      success:true,
-      message:"Payment submitted successfully",
+      success: true,
+      message: "Payment submitted successfully",
       payment
     });
 
   } catch (error) {
-
     console.error(error);
-
     res.status(500).json({
-      message:"Server error"
+      message: "Server error"
     });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| GET PENDING PAYMENTS
-|--------------------------------------------------------------------------
-*/
-
 router.get("/pending", async (req, res) => {
-
   try {
-
     const payments = await Payment
-      .find({ status:"pending" })
-      .sort({ createdAt:-1 });
+      .find({ status: "pending" })
+      .sort({ createdAt: -1 });
 
     res.json(payments);
 
   } catch (error) {
-
     console.error(error);
-
     res.status(500).json({
-      message:"Server error"
+      message: "Server error"
     });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| APPROVE PAYMENT
-|--------------------------------------------------------------------------
-*/
+router.get("/all", async (req, res) => {
+  try {
+    const payments = await Payment
+      .find()
+      .sort({ createdAt: -1 });
+
+    res.json(payments);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+});
 
 router.post("/:id/approve", async (req, res) => {
-
   try {
-
     const payment = await Payment.findById(req.params.id);
 
     if (!payment) {
       return res.status(404).json({
-        message:"Payment not found"
+        message: "Payment not found"
       });
     }
 
     if (payment.status !== "pending") {
       return res.status(400).json({
-        message:"Payment already processed"
+        message: "Payment already processed"
       });
     }
 
     payment.status = "approved";
-
     await payment.save();
 
     const user = await User.findOne({
@@ -130,9 +106,6 @@ router.post("/:id/approve", async (req, res) => {
     });
 
     if (user) {
-
-      const wasAlreadyActive = user.planActive === true;
-
       user.plan = payment.planNumber;
       user.planName = payment.planName;
       user.planActive = true;
@@ -140,78 +113,105 @@ router.post("/:id/approve", async (req, res) => {
 
       await user.save();
 
-  if (user.referredBy && !payment.referralBonusApplied) {
-    const referrer = await User.findById(user.referredBy);
+      if (user.referredBy && !payment.referralBonusApplied) {
+        const referrer = await User.findById(user.referredBy);
 
-    if (referrer) {
-      const referralBonusByPlan = {
-        1: 25,
-        2: 60,
-        3: 115,
-        4: 210
-      };
+        if (referrer) {
+          const referralBonusByPlan = {
+            1: 25,
+            2: 60,
+            3: 115,
+            4: 210
+          };
 
-      const bonusAmount = referralBonusByPlan[Number(payment.planNumber)] || 0;
+          const bonusAmount =
+            referralBonusByPlan[Number(payment.planNumber)] || 0;
 
-      referrer.activeReferralCount = (referrer.activeReferralCount || 0) + 1;
-      referrer.balance = Number(referrer.balance || 0) + bonusAmount;
+          referrer.activeReferralCount =
+            (referrer.activeReferralCount || 0) + 1;
 
-      await referrer.save();
+          referrer.balance =
+            Number(referrer.balance || 0) + bonusAmount;
+
+          await referrer.save();
+
+          await Transaction.create({
+            userId: referrer._id,
+            type: "referral_bonus",
+            title: "Referral Plan Bonus",
+            amount: bonusAmount,
+            status: "completed",
+            description: "Referral Plan Bonus",
+            referenceId: payment.paymentId,
+            meta: {
+              referredUserEmail: user.email,
+              planNumber: payment.planNumber,
+              planName: payment.planName,
+              bonusAmount
+            }
+          });
+
+          payment.referralBonusApplied = true;
+          await payment.save();
+        }
+      }
 
       await Transaction.create({
-        userId: referrer._id,
-        type: "referral_bonus",
-        title: "Referral Plan Bonus",
-        amount: bonusAmount,
-        status: "completed",
+        userId: user._id,
+        type: "payment_approved",
+        title: "Plan Activated: " + payment.planName,
+        amount: payment.amount,
+        status: "approved",
+        description: payment.planName + " Plan Activated",
         referenceId: payment.paymentId,
         meta: {
-          referredUserEmail: user.email,
           planNumber: payment.planNumber,
-          planName: payment.planName,
-          bonusAmount
+          planName: payment.planName
         }
       });
-
-      payment.referralBonusApplied = true;
-      await payment.save();
     }
+
+    res.json({
+      success: true,
+      message: "Payment approved"
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Server error"
+    });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| REJECT PAYMENT
-|--------------------------------------------------------------------------
-*/
-
 router.post("/:id/reject", async (req, res) => {
-
   try {
-
     const payment = await Payment.findById(req.params.id);
 
     if (!payment) {
       return res.status(404).json({
-        message:"Payment not found"
+        message: "Payment not found"
+      });
+    }
+
+    if (payment.status !== "pending") {
+      return res.status(400).json({
+        message: "Payment already processed"
       });
     }
 
     payment.status = "rejected";
-
     await payment.save();
 
     res.json({
-      success:true,
-      message:"Payment rejected"
+      success: true,
+      message: "Payment rejected"
     });
 
   } catch (error) {
-
     console.error(error);
-
     res.status(500).json({
-      message:"Server error"
+      message: "Server error"
     });
   }
 });
