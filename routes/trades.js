@@ -134,9 +134,7 @@ router.post("/use", requireAuth, async (req, res) => {
     const user = await User.findById(req.userId);
 
     if (!user) {
-      return res.status(404).json({
-        message: "User not found"
-      });
+      return res.status(404).json({ message: "User not found" });
     }
 
     const planNumber = Number(user.plan || 0);
@@ -156,7 +154,7 @@ router.post("/use", requireAuth, async (req, res) => {
       cooldown = await TradeCooldown.create({
         userId: user._id,
         usedTrades: 0,
-        resetAt: null
+        resetAt: getCooldownResetDate()
       });
     }
 
@@ -165,8 +163,7 @@ router.post("/use", requireAuth, async (req, res) => {
       new Date(cooldown.resetAt).getTime() <= Date.now()
     ) {
       cooldown.usedTrades = 0;
-      cooldown.resetAt = null;
-      await cooldown.save();
+      cooldown.resetAt = getCooldownResetDate();
     }
 
     if (cooldown.usedTrades >= config.maxTrades) {
@@ -177,22 +174,17 @@ router.post("/use", requireAuth, async (req, res) => {
     }
 
     const activeReferralCount = Number(user.activeReferralCount || 0);
-
     const rewardPerInvest = getRewardPerInvest(config);
-
     const referralBonusPercent = activeReferralCount * 0.07;
 
     const finalReward =
       rewardPerInvest * (1 + referralBonusPercent);
 
-    user.balance =
-      Number(user.balance || 0) + finalReward;
-
+    user.balance = Number(user.balance || 0) + finalReward;
     await user.save();
 
     cooldown.usedTrades += 1;
 
-    // Start 24h cooldown window from the first invest
     if (!cooldown.resetAt) {
       cooldown.resetAt = getCooldownResetDate();
     }
@@ -227,9 +219,7 @@ router.post("/use", requireAuth, async (req, res) => {
       usedTrades: cooldown.usedTrades,
       maxTrades: config.maxTrades,
       tradesLeft: Math.max(config.maxTrades - cooldown.usedTrades, 0),
-      cooldownText: cooldown.resetAt
-        ? formatCooldownText(cooldown.resetAt)
-        : "Available"
+      cooldownText: formatCooldownText(cooldown.resetAt)
     });
 
   } catch (error) {
