@@ -207,7 +207,7 @@ router.post("/use", requireAuth, async (req, res) => {
     // Само paid/approved referrals даваат boost.
     // 1 active referral = +20%
     const activeReferralCount = user.activeReferralCount || 0;
-    const referralBonusPercent = activeReferralCount * 0.20;
+    const referralBonusPercent = activeReferralCount * 0.07;
     const bonusAmount = baseReward * referralBonusPercent;
     const finalReward = baseReward + bonusAmount;
 
