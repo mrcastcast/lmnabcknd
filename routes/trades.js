@@ -192,7 +192,8 @@ router.post("/use", requireAuth, async (req, res) => {
 
     cooldown.usedTrades += 1;
 
-    if (cooldown.usedTrades >= config.maxTrades) {
+    // Start 24h cooldown window from the first invest
+    if (!cooldown.resetAt) {
       cooldown.resetAt = getCooldownResetDate();
     }
 
