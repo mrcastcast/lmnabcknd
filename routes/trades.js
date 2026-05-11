@@ -155,118 +155,111 @@ router.get("/status", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/use", requireAuth, async (req, res) => {
+router.post("/:id/approve", async (req, res) => {
+
   try {
-    const user = await User.findById(req.userId);
 
-    if (!user) {
+    const payment = await Payment.findById(req.params.id);
+
+    if (!payment) {
       return res.status(404).json({
-        message: "User not found"
+        message:"Payment not found"
       });
     }
 
-    if (!user.planActive || user.plan === 0) {
-      return res.status(403).json({
-        message: "Your plan is not active yet"
-      });
-    }
-
-    const config = getPlanConfig(user.plan);
-
-    if (!config) {
+    if (payment.status !== "pending") {
       return res.status(400).json({
-        message: "Invalid plan"
+        message:"Payment already processed"
       });
     }
 
-    const cooldown = await getOrResetCooldown(user._id, config.cooldownHours);
+    payment.status = "approved";
 
-    if (cooldown.tradesUsed >= config.maxInvests) {
-      const remainingMs = getRemainingMs(
-        cooldown.cooldownStart,
-        config.cooldownHours
-      );
+    await payment.save();
 
-      return res.status(429).json({
-        message: "Invest cooldown active",
-        maxTrades: config.maxInvests,
-        maxInvests: config.maxInvests,
-        tradesUsed: cooldown.tradesUsed,
-        tradesLeft: 0,
-        investsLeft: 0,
-        cooldownRemainingMs: remainingMs,
-        cooldownText: formatCooldown(remainingMs)
-      });
-    }
-
-    cooldown.tradesUsed += 1;
-    await cooldown.save();
-
-    const baseReward = config.rewardPerInvest;
-
-    // Само paid/approved referrals даваат boost.
-    // 1 active referral = +20%
-    const activeReferralCount = user.activeReferralCount || 0;
-    const referralBonusPercent = activeReferralCount * 0.07;
-    const bonusAmount = baseReward * referralBonusPercent;
-    const finalReward = baseReward + bonusAmount;
-
-    user.balance += finalReward;
-    await user.save();
-
-    await Transaction.create({
-      userId: user._id,
-      type: "trade_simulation",
-      title: "AI Investment Reward",
-      amount: Number(finalReward.toFixed(2)),
-      status: "completed",
-      referenceId: "INVEST-" + Date.now(),
-      meta: {
-        plan: user.plan,
-        planName: user.planName,
-        baseReward: Number(baseReward.toFixed(2)),
-        activeReferralCount,
-        referralBonusPercent: Number((referralBonusPercent * 100).toFixed(2)),
-        bonusAmount: Number(bonusAmount.toFixed(2)),
-        finalReward: Number(finalReward.toFixed(2)),
-        cooldownHours: config.cooldownHours,
-        maxInvests: config.maxInvests
-      }
+    const user = await User.findOne({
+      email: payment.email
     });
 
-    const remainingMs = getRemainingMs(
-      cooldown.cooldownStart,
-      config.cooldownHours
-    );
+    if (user) {
 
-    const investsLeft = Math.max(0, config.maxInvests - cooldown.tradesUsed);
+      user.plan = payment.planNumber;
+      user.planName = payment.planName;
+      user.planActive = true;
+      user.planActivatedAt = new Date();
+
+      await user.save();
+
+      if (user.referredBy && !payment.referralBonusApplied) {
+
+        const referrer = await User.findById(user.referredBy);
+
+        if (referrer) {
+
+          const referralBonusByPlan = {
+            1: 25,
+            2: 60,
+            3: 115,
+            4: 210
+          };
+
+          const bonusAmount =
+            referralBonusByPlan[Number(payment.planNumber)] || 0;
+
+          referrer.activeReferralCount =
+            (referrer.activeReferralCount || 0) + 1;
+
+          referrer.balance =
+            Number(referrer.balance || 0) + bonusAmount;
+
+          await referrer.save();
+
+          await Transaction.create({
+            userId: referrer._id,
+            type: "referral_bonus",
+            title: "Referral Plan Bonus",
+            amount: bonusAmount,
+            status: "completed",
+            referenceId: payment.paymentId,
+            meta: {
+              referredUserEmail: user.email,
+              planNumber: payment.planNumber,
+              planName: payment.planName,
+              bonusAmount
+            }
+          });
+
+          payment.referralBonusApplied = true;
+
+          await payment.save();
+        }
+      }
+
+      await Transaction.create({
+        userId: user._id,
+        type: "payment_approved",
+        title: "Plan Activated: " + payment.planName,
+        amount: payment.amount,
+        status: "approved",
+        referenceId: payment.paymentId,
+        meta: {
+          planNumber: payment.planNumber,
+          planName: payment.planName,
+        }
+      });
+    }
 
     res.json({
-      success: true,
-      message: "Invest completed",
-      plan: user.plan,
-      planName: user.planName,
-      maxTrades: config.maxInvests,
-      maxInvests: config.maxInvests,
-      tradesUsed: cooldown.tradesUsed,
-      tradesLeft: investsLeft,
-      investsLeft,
-      baseReward: Number(baseReward.toFixed(2)),
-      activeReferralCount,
-      referralBonusPercent: Number((referralBonusPercent * 100).toFixed(2)),
-      bonusAmount: Number(bonusAmount.toFixed(2)),
-      finalReward: Number(finalReward.toFixed(2)),
-      rewardPerInvest: Number(finalReward.toFixed(2)),
-      reward: Number(finalReward.toFixed(2)),
-      newBalance: Number(user.balance.toFixed(2)),
-      cooldownRemainingMs: remainingMs,
-      cooldownText: formatCooldown(remainingMs)
+      success:true,
+      message:"Payment approved"
     });
 
   } catch (error) {
+
     console.error(error);
+
     res.status(500).json({
-      message: "Server error"
+      message:"Server error"
     });
   }
 });
